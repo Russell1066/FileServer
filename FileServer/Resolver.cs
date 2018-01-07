@@ -11,7 +11,7 @@ namespace FileServer1
     {
         private static Dictionary<Type, Expression> Cache { get; } = new Dictionary<Type, Expression>();
 
-        public static EntityResolver<T> From<T>() where T : new()
+        public static EntityResolver<T> From<T>() where T : class, new()
         {
             if (!Cache.TryGetValue(typeof(T), out var rawExpresion))
             {
@@ -23,34 +23,41 @@ namespace FileServer1
 
         private static Expression Generator<T>() where T : new()
         {
-            var tType = typeof(T);
-            var pk = Expression.Parameter(typeof(string));
-            var rk = Expression.Parameter(typeof(string));
-            var ts = Expression.Parameter(typeof(DateTimeOffset));
-            var props = Expression.Parameter(typeof(IDictionary<string, EntityProperty>));
-            var etag = Expression.Parameter(typeof(string));
-            var newType = Expression.New(tType);
-            var outputVar = Expression.Assign(Expression.Variable(tType), newType);
+            Expression<EntityResolver<T>> template =
+                (string pk, string rk, DateTimeOffset ts, IDictionary<string, EntityProperty> props, string etag) => default(T);
 
-            var properties = tType.GetProperties().Select(outProperty =>
+            var rowProps = template.Parameters[3];
+
+            var containsKey = typeof(IDictionary<string, EntityProperty>).GetMethod("ContainsKey");
+
+            var properties = typeof(T).GetProperties().Select(outProperty =>
             {
-                    // Use the "Item" accessor to dereference the dictionary here
-                    var item = Expression.Property(props, "Item", Expression.Constant(outProperty.Name));
+                var propName = Expression.Constant(outProperty.Name);
 
+                // Use the "Item" accessor to dereference the dictionary here
+                var item = Expression.Property(rowProps, "Item", propName);
+
+                // Set the value only if the row has it
+                var contains = Expression.Call(rowProps, containsKey, propName);
                 var accessor = GetAccessor(item, outProperty.PropertyType);
+                var defaultValue = Expression.Default(outProperty.PropertyType);
+                var test = Expression.Condition(contains, accessor, defaultValue);
 
-                return Expression.Bind(outProperty, accessor);
+                return Expression.Bind(outProperty, test);
             });
 
-            var body = Expression.MemberInit(newType, properties);
+            var body = Expression.MemberInit(Expression.New(typeof(T)), properties);
 
-            var retv = Expression.Lambda<EntityResolver<T>>(
-               body, new List<ParameterExpression> { pk, rk, ts, props, etag }
+            var resolver = Expression.Lambda<EntityResolver<T>>(
+               body,
+               $"{typeof(T).Name}Resolver",
+               false,
+               template.Parameters
                );
 
-            Cache[tType] = retv;
+            Cache[typeof(T)] = resolver;
 
-            return retv;
+            return resolver;
         }
 
         private static Expression GetAccessor(Expression item, Type type)
@@ -59,37 +66,31 @@ namespace FileServer1
 
             if (type == typeof(string))
             {
-                accessor = Expression.Property(item, "StringValue");
+                return Expression.Property(item, "StringValue");
             }
 
-            if (type == typeof(int))
+            Dictionary<Type, string> knownTypes = new Dictionary<Type, string>
             {
-                accessor = Expression.Coalesce(Expression.Property(item, "Int32Value"), Expression.Constant(-1));
-            }
+                [typeof(int)] = "Int32Value",
+                [typeof(bool)] = "BooleanValue",
+                [typeof(DateTime)] = "DateTime",
+                [typeof(DateTimeOffset)] = "DateTimeOffsetValue",
+                [typeof(Double)] = "DoubleValue",
+                [typeof(Guid)] = "GuidValue",
+            };
 
-            if (type == typeof(bool))
+            if (knownTypes.TryGetValue(type, out var accessorName))
             {
-                accessor = Expression.Coalesce(Expression.Property(item, "BooleanValue"), Expression.Constant(false));
+                accessor = Expression.Coalesce(Expression.Property(item, accessorName), Expression.Default(type));
             }
-
-            if (type == typeof(DateTime))
+            else if (type.IsGenericType && type.GetGenericTypeDefinition() == typeof(Nullable<>))
             {
-                accessor = Expression.Coalesce(Expression.Property(item, "DateTime"), Expression.Constant(DateTime.MinValue));
-            }
+                var underlying = Nullable.GetUnderlyingType(type);
 
-            if (type == typeof(DateTimeOffset))
-            {
-                accessor = Expression.Coalesce(Expression.Property(item, "DateTimeOffsetValue"), Expression.Constant(DateTimeOffset.MinValue));
-            }
-
-            if (type == typeof(Double))
-            {
-                accessor = Expression.Coalesce(Expression.Property(item, "DoubleValue"), Expression.Constant(Double.MinValue));
-            }
-
-            if (type == typeof(Guid))
-            {
-                accessor = Expression.Coalesce(Expression.Property(item, "GuidValue"), Expression.Constant(Guid.Empty));
+                if (knownTypes.TryGetValue(underlying, out accessorName))
+                {
+                    accessor = Expression.Property(item, accessorName);
+                }
             }
 
             if (accessor == null)
