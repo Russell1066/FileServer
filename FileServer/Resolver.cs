@@ -10,12 +10,29 @@ namespace FileServer1
     public static class Resolver
     {
         private static Dictionary<Type, Expression> Cache { get; } = new Dictionary<Type, Expression>();
+        private static Dictionary<Type, string> KnownTypes = new Dictionary<Type, string>
+        {
+            [typeof(int)] = $"{nameof(EntityProperty.Int32Value)}",
+            [typeof(long)] = $"{nameof(EntityProperty.Int64Value)}",
+            [typeof(bool)] = $"{nameof(EntityProperty.BooleanValue)}",
+            [typeof(DateTime)] = $"{nameof(EntityProperty.DateTime)}",
+            [typeof(DateTimeOffset)] = $"{nameof(EntityProperty.DateTimeOffsetValue)}",
+            [typeof(Double)] = $"{nameof(EntityProperty.DoubleValue)}",
+            [typeof(Guid)] = $"{nameof(EntityProperty.GuidValue)}",
+        };
+
+        // BUGBUG: this will cache the state of the WrapExceptions at the time of generation
+        // If a cache is to be used correctly it should include the WrapExceptions state at the time of each call
+        // so Dictionary<KeyValuePair<bool, Type>, Expression>
+        // But really you should set WrapExceptions once and never change it...I think
+        public static bool WrapExceptions { get; set; }
 
         public static EntityResolver<T> From<T>() where T : class, new()
         {
             if (!Cache.TryGetValue(typeof(T), out var rawExpresion))
             {
                 rawExpresion = Generator<T>();
+                Cache[typeof(T)] = rawExpresion;
             }
 
             return (rawExpresion as Expression<EntityResolver<T>>).Compile();
@@ -38,14 +55,23 @@ namespace FileServer1
                 var item = Expression.Property(rowProps, "Item", propName);
 
                 // Set the value only if the row has it
+                // test = rowProps.ContainsKey(propName) ? GetAccessor(rowProps[propName])()  : default(typeof(T));
                 var contains = Expression.Call(rowProps, containsKey, propName);
                 var accessor = GetAccessor(item, outProperty.PropertyType);
                 var defaultValue = Expression.Default(outProperty.PropertyType);
-                var test = Expression.Condition(contains, accessor, defaultValue);
+                var accessedValue = Expression.Condition(contains, accessor, defaultValue);
 
-                return Expression.Bind(outProperty, test);
+                // Add a try catch handler that will return a default value if assignment doesn't work
+                var catchHandler = Expression.Catch(Expression.Parameter(typeof(Exception)), defaultValue);
+                var catchBlock = Expression.TryCatch(accessedValue, catchHandler);
+
+                var expression = WrapExceptions ? (Expression)catchBlock : accessedValue;
+
+                // outProperty = expression,
+                return Expression.Bind(outProperty, expression);
             });
 
+            // body = new T { member1 = fromRow, ...};
             var body = Expression.MemberInit(Expression.New(typeof(T)), properties);
 
             var resolver = Expression.Lambda<EntityResolver<T>>(
@@ -54,8 +80,6 @@ namespace FileServer1
                false,
                template.Parameters
                );
-
-            Cache[typeof(T)] = resolver;
 
             return resolver;
         }
@@ -66,20 +90,10 @@ namespace FileServer1
 
             if (type == typeof(string))
             {
-                return Expression.Property(item, "StringValue");
+                return Expression.Property(item, $"{nameof(EntityProperty.StringValue)}");
             }
 
-            Dictionary<Type, string> knownTypes = new Dictionary<Type, string>
-            {
-                [typeof(int)] = "Int32Value",
-                [typeof(bool)] = "BooleanValue",
-                [typeof(DateTime)] = "DateTime",
-                [typeof(DateTimeOffset)] = "DateTimeOffsetValue",
-                [typeof(Double)] = "DoubleValue",
-                [typeof(Guid)] = "GuidValue",
-            };
-
-            if (knownTypes.TryGetValue(type, out var accessorName))
+            if (KnownTypes.TryGetValue(type, out var accessorName))
             {
                 accessor = Expression.Coalesce(Expression.Property(item, accessorName), Expression.Default(type));
             }
@@ -87,7 +101,7 @@ namespace FileServer1
             {
                 var underlying = Nullable.GetUnderlyingType(type);
 
-                if (knownTypes.TryGetValue(underlying, out accessorName))
+                if (KnownTypes.TryGetValue(underlying, out accessorName))
                 {
                     accessor = Expression.Property(item, accessorName);
                 }
@@ -122,3 +136,4 @@ namespace FileServer1
         }
     }
 }
+
