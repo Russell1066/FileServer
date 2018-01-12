@@ -1,11 +1,11 @@
-﻿using System.Linq;
-using Microsoft.WindowsAzure.Storage.Table;
+﻿using Microsoft.WindowsAzure.Storage.Table;
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Linq.Expressions;
 using System.Runtime.Serialization;
 
-namespace FileServer1
+namespace Utilities
 {
     public static class Resolver
     {

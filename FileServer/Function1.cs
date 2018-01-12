@@ -11,6 +11,7 @@ using Microsoft.WindowsAzure.Storage.Blob;
 using System.Linq;
 using Microsoft.WindowsAzure.Storage.Table;
 using System;
+using Utilities;
 
 namespace FileServer1
 {
@@ -23,6 +24,20 @@ namespace FileServer1
             public int Size { get; set; }
             public int DownloadCount { get; set; }
             public bool DownloadPermitted { get; set; }
+
+            // BUGBUG remove
+            public class BoolHolder
+            {
+                public bool BoolValue { get; set; }
+
+                public static void RegisterBoolHolder()
+                {
+                    Resolver.AddConverter(s => new BoolHolder
+                    {
+                        BoolValue = bool.Parse(s)
+                    });
+                }
+            }
         };
 
         [FunctionName("DownloadFile")]
@@ -33,6 +48,9 @@ namespace FileServer1
             TraceWriter log)
         {
             var pk = "images";
+
+            ImageInfo.BoolHolder.RegisterBoolHolder();
+            Resolver.WrapExceptions = true;
 
             // force the input to be a guid
             if (!Guid.TryParse(file, out var fileGuid))
