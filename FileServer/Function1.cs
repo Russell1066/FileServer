@@ -50,10 +50,7 @@ namespace FileServer1
 
             try
             {
-                var entries = (await fileserver.ExecuteQuerySegmentedAsync(query, Resolver.From<ImageInfo>(), null))
-                .ToList();
-                ;
-
+                var entries = (await fileserver.ExecuteQuerySegmentedAsync(query, Resolver.From<ImageInfo>(), null));
                 var entry = entries.FirstOrDefault();
 
                 if (entry == null)
