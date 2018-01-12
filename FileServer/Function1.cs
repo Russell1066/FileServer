@@ -25,6 +25,8 @@ namespace FileServer1
             public int DownloadCount { get; set; }
             public bool DownloadPermitted { get; set; }
 
+            public BoolHolder Test { get; set; }
+
             // BUGBUG remove
             public class BoolHolder
             {
@@ -34,8 +36,13 @@ namespace FileServer1
                 {
                     Resolver.AddConverter(s => new BoolHolder
                     {
-                        BoolValue = bool.Parse(s)
+                        BoolValue = DemonstrationMethod(s)
                     });
+                }
+
+                private static bool DemonstrationMethod(string s)
+                {
+                    return bool.Parse(s);
                 }
             }
         };
