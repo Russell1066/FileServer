@@ -21,6 +21,8 @@ namespace FileServer1
             [typeof(Guid)] = $"{nameof(EntityProperty.GuidValue)}",
         };
 
+        private static Dictionary<Type, Expression> Converters = new Dictionary<Type, Expression>();
+
         // BUGBUG: this will cache the state of the WrapExceptions at the time of generation
         // If a cache is to be used correctly it should include the WrapExceptions state at the time of each call
         // so Dictionary<KeyValuePair<bool, Type>, Expression>
@@ -62,7 +64,7 @@ namespace FileServer1
                 var accessedValue = Expression.Condition(contains, accessor, defaultValue);
 
                 // Add a try catch handler that will return a default value if assignment doesn't work
-                var catchHandler = Expression.Catch(Expression.Parameter(typeof(Exception)), defaultValue);
+                var catchHandler = Expression.Catch(Expression.Parameter(typeof(System.Exception)), defaultValue);
                 var catchBlock = Expression.TryCatch(accessedValue, catchHandler);
 
                 var expression = WrapExceptions ? (Expression)catchBlock : accessedValue;
@@ -84,13 +86,20 @@ namespace FileServer1
             return resolver;
         }
 
+        public static void AddConverter<TResult>(Expression<Func<string, TResult>> converter)
+        {
+            Converters[typeof(TResult)] = converter;
+        }
+
         private static Expression GetAccessor(Expression item, Type type)
         {
             Expression accessor = null;
 
+            var getString = Expression.Property(item, $"{nameof(EntityProperty.StringValue)}");
+
             if (type == typeof(string))
             {
-                return Expression.Property(item, $"{nameof(EntityProperty.StringValue)}");
+                return getString;
             }
 
             if (KnownTypes.TryGetValue(type, out var accessorName))
@@ -107,30 +116,39 @@ namespace FileServer1
                 }
             }
 
+            // Do a lookup to see if there is a type that is suitable
             if (accessor == null)
             {
-                throw new Exception($"GetAccessor didn't recognize the type '{type.Name}' - contact author for fix");
+                if (Converters.TryGetValue(type, out var converter))
+                {
+                    accessor = Expression.Invoke(converter, getString);
+                }
+            }
+
+            if (accessor == null)
+            {
+                throw new ResolverException($"GetAccessor didn't recognize the type '{type.Name}' - add a conversion from string");
             }
 
             return accessor;
         }
 
         [Serializable]
-        private class Exception : System.Exception
+        private class ResolverException : System.Exception
         {
-            public Exception()
+            public ResolverException()
             {
             }
 
-            public Exception(string message) : base(message)
+            public ResolverException(string message) : base(message)
             {
             }
 
-            public Exception(string message, System.Exception innerException) : base(message, innerException)
+            public ResolverException(string message, System.Exception innerException) : base(message, innerException)
             {
             }
 
-            protected Exception(SerializationInfo info, StreamingContext context) : base(info, context)
+            protected ResolverException(SerializationInfo info, StreamingContext context) : base(info, context)
             {
             }
         }
