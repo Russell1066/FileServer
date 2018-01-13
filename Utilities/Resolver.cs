@@ -158,7 +158,7 @@ namespace Utilities
             {
                 if (p.Name == Find.Name)
                 {
-                    return base.Visit(Replace);
+                    return Replace;
                 }
 
                 return base.VisitParameter(p);
