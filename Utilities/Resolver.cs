@@ -27,7 +27,8 @@ namespace Utilities
         // If a cache is to be used correctly it should include the WrapExceptions state at the time of each call
         // so Dictionary<KeyValuePair<bool, Type>, Expression>
         // But really you should set WrapExceptions once and never change it...I think
-        public static bool WrapExceptions { get; set; }
+        public static bool WrapExceptions { get; set; } = true;
+        public static bool TestPropertyExists { get; set; } = true;
 
         public static EntityResolver<T> From<T>() where T : class, new()
         {
@@ -61,13 +62,14 @@ namespace Utilities
                 var contains = Expression.Call(rowProps, containsKey, propName);
                 var accessor = GetAccessor(item, outProperty.PropertyType);
                 var defaultValue = Expression.Default(outProperty.PropertyType);
-                var accessedValue = Expression.Condition(contains, accessor, defaultValue);
+                var conditionalExpression = Expression.Condition(contains, accessor, defaultValue);
+                var accessedValue = TestPropertyExists ? conditionalExpression : accessor;
 
                 // Add a try catch handler that will return a default value if assignment doesn't work
                 var catchHandler = Expression.Catch(Expression.Parameter(typeof(System.Exception)), defaultValue);
                 var catchBlock = Expression.TryCatch(accessedValue, catchHandler);
 
-                var expression = WrapExceptions ? (Expression)catchBlock : accessedValue;
+                var expression = WrapExceptions ? catchBlock : accessedValue;
 
                 // outProperty = expression,
                 return Expression.Bind(outProperty, expression);
@@ -121,7 +123,16 @@ namespace Utilities
             {
                 if (Converters.TryGetValue(type, out var converter))
                 {
-                    accessor = Expression.Invoke(converter, getString);
+                    var lambda = converter as LambdaExpression;
+
+                    // Create a temporary variable
+                    // this ensures against multiple accesses to the getString in the lambda
+                    var variable = Expression.Variable(typeof(string));
+                    var assign = Expression.Assign(variable, getString);
+
+                    // inline the lambda by replacing the string parameter with the variable
+                    var work = ParameterReplace.Modify(lambda.Body, lambda.Parameters[0], variable);
+                    accessor = Expression.Block(variable, assign, work);
                 }
             }
 
@@ -131,6 +142,27 @@ namespace Utilities
             }
 
             return accessor;
+        }
+
+        public class ParameterReplace : ExpressionVisitor
+        {
+            private ParameterExpression Find;
+            private Expression Replace;
+
+            static public Expression Modify(Expression expression, ParameterExpression find, Expression replace)
+            {
+                return new ParameterReplace { Replace = replace, Find = find }.Visit(expression);
+            }
+
+            protected override Expression VisitParameter(ParameterExpression p)
+            {
+                if (p.Name == Find.Name)
+                {
+                    return base.Visit(Replace);
+                }
+
+                return base.VisitParameter(p);
+            }
         }
 
         [Serializable]
