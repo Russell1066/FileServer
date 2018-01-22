@@ -99,7 +99,6 @@ namespace FileServer1
         {
             var pk = "images";
 
-
             await fileserver.ExecuteAsync(TableOperation.Insert(
                 new TableEntityAdapter<ImageInfo>(new ImageInfo { Directory = "No Directory Set", File = "no file set" }, pk, Guid.NewGuid().ToString())
                                 ));
